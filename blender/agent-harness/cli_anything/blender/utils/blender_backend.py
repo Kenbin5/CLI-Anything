@@ -67,6 +67,89 @@ def render_script(
     }
 
 
+def resolve_output(output_path: str) -> Optional[str]:
+    """Return the real rendered file, or None if nothing was produced.
+
+    Blender appends a frame number to the output path for single frames,
+    e.g. /tmp/render.png becomes /tmp/render0001.png.
+    """
+    if os.path.exists(output_path):
+        return output_path
+    base, ext = os.path.splitext(output_path)
+    for suffix in ("0001", "0000", "1"):
+        candidate = f"{base}{suffix}{ext}"
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def render_script_file(
+    script_path: str,
+    output_path: str,
+    timeout: int = 300,
+    animation: bool = False,
+) -> dict:
+    """Render an on-disk bpy script with Blender headless and verify the output.
+
+    Args:
+        script_path: Path to the bpy script to execute
+        output_path: Expected output file, or the frame-sequence base for animation
+        timeout: Maximum seconds to wait
+        animation: True when the script renders a frame range
+
+    Returns:
+        Dict with output path, file size, method, blender version, command
+    """
+    result = render_script(script_path, timeout=timeout)
+
+    if result["returncode"] != 0:
+        raise RuntimeError(
+            f"Blender render failed (exit {result['returncode']}):\n"
+            f"  stderr: {result['stderr'][-500:]}"
+        )
+
+    if animation:
+        base, ext = os.path.splitext(os.path.abspath(output_path))
+        frame_dir = os.path.dirname(base) or "."
+        prefix = os.path.basename(base)
+        frames = sorted(
+            f for f in os.listdir(frame_dir)
+            if f.startswith(prefix) and f.endswith(ext)
+        )
+        if not frames:
+            raise RuntimeError(
+                f"Blender render produced no frames.\n"
+                f"  Expected: {output_path}\n"
+                f"  stdout: {result['stdout'][-500:]}"
+            )
+        return {
+            "output": frame_dir,
+            "frames": len(frames),
+            "first_frame": os.path.join(frame_dir, frames[0]),
+            "format": ext.lstrip("."),
+            "method": "blender-headless",
+            "blender_version": get_version(),
+            "command": result["command"],
+        }
+
+    actual_output = resolve_output(output_path)
+    if actual_output is None:
+        raise RuntimeError(
+            f"Blender render produced no output file.\n"
+            f"  Expected: {output_path}\n"
+            f"  stdout: {result['stdout'][-500:]}"
+        )
+
+    return {
+        "output": os.path.abspath(actual_output),
+        "format": os.path.splitext(actual_output)[1].lstrip("."),
+        "method": "blender-headless",
+        "blender_version": get_version(),
+        "file_size": os.path.getsize(actual_output),
+        "command": result["command"],
+    }
+
+
 def render_scene_headless(
     bpy_script_content: str,
     output_path: str,
@@ -89,40 +172,6 @@ def render_scene_headless(
         script_path = f.name
 
     try:
-        result = render_script(script_path, timeout=timeout)
-
-        if result["returncode"] != 0:
-            raise RuntimeError(
-                f"Blender render failed (exit {result['returncode']}):\n"
-                f"  stderr: {result['stderr'][-500:]}"
-            )
-
-        # Verify the output file was created
-        # Blender appends frame number to output path for single frames
-        # e.g., /tmp/render.png becomes /tmp/render0001.png
-        actual_output = output_path
-        if not os.path.exists(actual_output):
-            # Try with frame number suffix
-            base, ext = os.path.splitext(output_path)
-            for suffix in ["0001", "0000", "1"]:
-                candidate = f"{base}{suffix}{ext}"
-                if os.path.exists(candidate):
-                    actual_output = candidate
-                    break
-
-        if not os.path.exists(actual_output):
-            raise RuntimeError(
-                f"Blender render produced no output file.\n"
-                f"  Expected: {output_path}\n"
-                f"  stdout: {result['stdout'][-500:]}"
-            )
-
-        return {
-            "output": os.path.abspath(actual_output),
-            "format": os.path.splitext(actual_output)[1].lstrip("."),
-            "method": "blender-headless",
-            "blender_version": get_version(),
-            "file_size": os.path.getsize(actual_output),
-        }
+        return render_script_file(script_path, output_path, timeout=timeout)
     finally:
         os.unlink(script_path)

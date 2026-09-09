@@ -185,11 +185,14 @@ def render_scene(
     frame: Optional[int] = None,
     animation: bool = False,
     overwrite: bool = False,
+    execute: bool = True,
+    timeout: int = 300,
 ) -> Dict[str, Any]:
-    """Render the scene by generating a bpy script.
+    """Render the scene with Blender headless.
 
-    Since we cannot call Blender directly in all environments, this generates
-    a Python script that can be run with `blender --background --python script.py`.
+    Generates a bpy script, then invokes the real Blender to render it and
+    verifies an output file was actually produced. Pass execute=False to stop
+    after writing the script (useful for inspecting the generated bpy source).
 
     Args:
         project: The scene dict
@@ -197,9 +200,11 @@ def render_scene(
         frame: Specific frame to render (None = current frame)
         animation: If True, render the full animation range
         overwrite: Allow overwriting existing files
+        execute: If True, invoke Blender; if False, only write the script
+        timeout: Maximum seconds to wait for Blender
 
     Returns:
-        Dict with render info and script path
+        Dict with render info, script path, and (when executed) the real output
     """
     if os.path.exists(output_path) and not overwrite and not animation:
         raise FileExistsError(f"Output file exists: {output_path}. Use --overwrite.")
@@ -235,6 +240,19 @@ def render_scene(
         result["frame_range"] = f"{scene_settings.get('frame_start', 1)}-{scene_settings.get('frame_end', 250)}"
     else:
         result["frame"] = frame or scene_settings.get("frame_current", 1)
+
+    if not execute:
+        result["executed"] = False
+        return result
+
+    from cli_anything.blender.utils import blender_backend
+
+    render_result = blender_backend.render_script_file(
+        script_path, abs_output_path, timeout=timeout, animation=animation,
+    )
+    result.update(render_result)
+    result["executed"] = True
+    result["script_path"] = os.path.abspath(script_path)
 
     return result
 
