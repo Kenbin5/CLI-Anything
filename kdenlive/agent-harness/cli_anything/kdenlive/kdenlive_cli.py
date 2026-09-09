@@ -628,6 +628,23 @@ def export_xml(output):
         click.echo(xml)
 
 
+@export.command("render")
+@click.argument("output_path")
+@click.option("--preset", "-p", type=str, default="h264_hq", help="Render preset")
+@click.option("--overwrite", is_flag=True, help="Overwrite existing file")
+@click.option("--timeout", type=int, default=300, help="Max seconds to wait for melt")
+@click.option("--keep-mlt", type=str, default=None, help="Also write the MLT XML here")
+@handle_error
+def export_render(output_path, preset, overwrite, timeout, keep_mlt):
+    """Render the project to a video file with melt."""
+    sess = get_session()
+    result = export_mod.render_project(
+        sess.get_project(), output_path,
+        preset=preset, overwrite=overwrite, timeout=timeout, keep_mlt=keep_mlt,
+    )
+    output(result, f"Rendered: {result['output']}")
+
+
 @export.command("presets")
 @handle_error
 def export_presets():

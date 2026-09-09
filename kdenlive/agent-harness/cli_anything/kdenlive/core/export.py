@@ -1,5 +1,7 @@
-"""Kdenlive CLI - Export module: JSON to MLT/Kdenlive XML generation."""
+"""Kdenlive CLI - Export module: JSON to MLT/Kdenlive XML generation and rendering."""
 
+import os
+import tempfile
 from typing import Dict, Any, List, Optional
 from cli_anything.kdenlive.utils.mlt_xml import (
     xml_escape,
@@ -82,6 +84,77 @@ def generate_kdenlive_xml(project: Dict[str, Any]) -> str:
     Returns the XML string.
     """
     return build_mlt_xml(project)
+
+
+def render_project(
+    project: Dict[str, Any],
+    output_path: str,
+    preset: str = "h264_hq",
+    overwrite: bool = False,
+    timeout: int = 300,
+    keep_mlt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Render the project to a video file using the real melt renderer.
+
+    The project is serialised to MLT XML, then handed to melt, which applies
+    every project-level filter and transition. Rendering with a tool that only
+    reads the raw source clips would silently drop them.
+
+    Args:
+        project: The project dict
+        output_path: Output video file path
+        preset: Name of a preset in RENDER_PRESETS
+        overwrite: Allow overwriting an existing output file
+        timeout: Maximum seconds to wait for melt
+        keep_mlt: If set, write the intermediate MLT XML here and keep it
+
+    Returns:
+        Dict with output path, file size, codecs, preset and method
+    """
+    if preset not in RENDER_PRESETS:
+        raise ValueError(
+            f"Unknown preset: {preset}. "
+            f"Available: {', '.join(sorted(RENDER_PRESETS))}"
+        )
+    p = RENDER_PRESETS[preset]
+
+    if os.path.exists(output_path) and not overwrite:
+        raise FileExistsError(f"Output file exists: {output_path}. Use --overwrite.")
+
+    from cli_anything.kdenlive.utils import melt_backend
+
+    xml = generate_kdenlive_xml(project)
+
+    if keep_mlt:
+        mlt_path = os.path.abspath(keep_mlt)
+        os.makedirs(os.path.dirname(mlt_path), exist_ok=True)
+        with open(mlt_path, "w") as f:
+            f.write(xml)
+        cleanup = False
+    else:
+        fd, mlt_path = tempfile.mkstemp(suffix=".mlt", prefix="kdenlive_render_")
+        with os.fdopen(fd, "w") as f:
+            f.write(xml)
+        cleanup = True
+
+    try:
+        result = melt_backend.render_mlt(
+            mlt_path, output_path,
+            vcodec=p["vcodec"], acodec=p["acodec"],
+            overwrite=overwrite, timeout=timeout,
+        )
+    finally:
+        if cleanup and os.path.exists(mlt_path):
+            os.unlink(mlt_path)
+
+    result.update({
+        "preset": preset,
+        "vcodec": p["vcodec"],
+        "acodec": p["acodec"],
+    })
+    if keep_mlt:
+        result["mlt_path"] = mlt_path
+    return result
 
 
 def list_render_presets() -> List[Dict[str, Any]]:
