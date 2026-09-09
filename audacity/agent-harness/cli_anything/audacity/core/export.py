@@ -8,6 +8,7 @@ Effects are applied in the audio domain using the audio_utils module.
 """
 
 import os
+import tempfile
 import wave
 import math
 import struct
@@ -201,12 +202,27 @@ def render_mix(
     mixed = clamp_samples(mixed)
 
     # Export
+    export_method = "python-wave"
     if fmt == "WAV":
         write_wav(output_path, mixed, sample_rate, out_channels, bit_depth)
     else:
-        # For non-WAV formats, write a WAV first and note that conversion
-        # requires external tools
-        write_wav(output_path, mixed, sample_rate, out_channels, bit_depth)
+        # Non-WAV formats: render a WAV, then convert it with the real SoX.
+        # Writing WAV bytes under an .mp3/.flac/.ogg/.aiff name produces a
+        # silently corrupt file, so the conversion is mandatory, not optional.
+        from cli_anything.audacity.utils import sox_backend
+
+        tmp_fd, tmp_wav = tempfile.mkstemp(suffix=".wav", prefix="audacity_export_")
+        os.close(tmp_fd)
+        try:
+            write_wav(tmp_wav, mixed, sample_rate, out_channels, bit_depth)
+            conv = sox_backend.convert_format(
+                tmp_wav, output_path,
+                sample_rate=sample_rate, channels=out_channels,
+            )
+            export_method = conv["method"]
+        finally:
+            if os.path.exists(tmp_wav):
+                os.unlink(tmp_wav)
 
     # Verify output
     file_size = os.path.getsize(output_path)
@@ -223,6 +239,7 @@ def render_mix(
         "file_size": file_size,
         "file_size_human": _human_size(file_size),
         "preset": preset,
+        "method": export_method,
         "tracks_rendered": len(rendered_tracks),
         "peak_level": round(get_peak(mixed), 4),
         "rms_level": round(get_rms(mixed), 4),
