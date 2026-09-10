@@ -23,6 +23,27 @@ _GIMP_BACKEND_ERROR: Optional[str] = None
 _REQUEST_SCOPED_ERRORS = (FileExistsError, FileNotFoundError, ValueError, KeyError)
 
 
+def _summarise_backend_error(exc: BaseException) -> str:
+    """Bounded, non-leaky description of a GIMP backend failure.
+
+    subprocess.TimeoutExpired and CalledProcessError stringify their whole
+    argv, and the argv here embeds the generated Script-Fu program — layer
+    names, text-layer contents and file paths. That text would otherwise be
+    printed, returned in JSON, and retained in the process-wide cache, so
+    summarise those by exception type instead of interpolating the message.
+    """
+    import subprocess
+
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"TimeoutExpired: GIMP batch exceeded {exc.timeout}s"
+    if isinstance(exc, subprocess.CalledProcessError):
+        return f"CalledProcessError: GIMP batch exited {exc.returncode}"
+    detail = str(exc).splitlines()[0] if str(exc) else ""
+    if len(detail) > 200:
+        detail = detail[:200] + "…"
+    return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+
 # Export presets
 EXPORT_PRESETS = {
     "png": {"format": "PNG", "ext": ".png", "params": {"compress_level": 6}},
@@ -109,7 +130,7 @@ def render(
             # and never let it disable GIMP for subsequent renders.
             raise
         except Exception as exc:
-            skip_reason = f"{type(exc).__name__}: {exc}"
+            skip_reason = _summarise_backend_error(exc)
             _GIMP_BACKEND_ERROR = skip_reason
 
     if require_gimp:
