@@ -51,7 +51,11 @@ def render_script(
         raise FileNotFoundError(f"Script not found: {script_path}")
 
     blender = find_blender()
-    cmd = [blender, "--background", "--python", script_path]
+    # Without --python-exit-code, Blender exits 0 even when the bpy script
+    # raises, so returncode alone cannot tell a completed render from a
+    # script that died partway through.
+    cmd = [blender, "--background", "--python-exit-code", "1",
+           "--python", script_path]
 
     result = subprocess.run(
         cmd,
@@ -132,14 +136,11 @@ def render_script_file(
 
     # Mark the start on the same filesystem as the frames rather than trusting
     # wall-clock time: the two can disagree, and mtime granularity varies.
-    started_marker = None
-    render_started = 0.0
-    if animation:
-        marker_dir = os.path.dirname(os.path.abspath(output_path)) or "."
-        os.makedirs(marker_dir, exist_ok=True)
-        fd, started_marker = tempfile.mkstemp(prefix=".render_started_", dir=marker_dir)
-        os.close(fd)
-        render_started = os.path.getmtime(started_marker)
+    marker_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    os.makedirs(marker_dir, exist_ok=True)
+    fd, started_marker = tempfile.mkstemp(prefix=".render_started_", dir=marker_dir)
+    os.close(fd)
+    render_started = os.path.getmtime(started_marker)
 
     try:
         result = render_script(script_path, timeout=timeout)
@@ -188,6 +189,17 @@ def render_script_file(
         }
 
     actual_output = resolve_output(output_path, expected_ext)
+
+    # A pre-existing file at the target is not proof of a render. With
+    # --overwrite the guard in render_scene deliberately steps aside, so a
+    # script that died before writing would otherwise let the stale file be
+    # reported as this run's output.
+    if actual_output is not None and os.path.getmtime(actual_output) < render_started:
+        raise RuntimeError(
+            f"Blender left the existing file untouched — no new render was produced.\n"
+            f"  Path: {actual_output}\n"
+            f"  stderr: {result['stderr'][-500:]}"
+        )
     if actual_output is None:
         raise RuntimeError(
             f"Blender render produced no output file.\n"
