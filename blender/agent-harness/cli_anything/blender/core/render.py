@@ -73,6 +73,10 @@ FORMAT_EXTENSIONS = {
     "FFMPEG": ".mp4",
 }
 
+# Formats that emit a single movie file rather than a numbered frame
+# sequence, even when a frame range is rendered.
+MOVIE_FORMATS = {"FFMPEG"}
+
 
 def set_render_settings(
     project: Dict[str, Any],
@@ -285,6 +289,7 @@ def render_scene(
     render_result = blender_backend.render_script_file(
         script_path, abs_output_path, timeout=timeout, animation=animation,
         expected_ext=expected_ext,
+        movie=render_settings.get("output_format") in MOVIE_FORMATS,
     )
     result.update(render_result)
     result["executed"] = True

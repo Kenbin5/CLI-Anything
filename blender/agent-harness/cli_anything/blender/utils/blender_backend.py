@@ -5,6 +5,7 @@ Requires: blender (system package)
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -97,7 +98,13 @@ def resolve_output(output_path: str, expected_ext: Optional[str] = None) -> Opti
 
 
 def _frame_files(output_path: str, expected_ext: Optional[str] = None) -> set:
-    """Names in the output directory that match the frame-sequence prefix."""
+    """Names in the output directory that are frames of this sequence.
+
+    Blender numbers frames as <prefix><digits><ext>. Matching on prefix and
+    extension alone would also pick up unrelated neighbours such as
+    frame_preview.png, which would then block a render without --overwrite
+    and be miscounted as an emitted frame with it.
+    """
     base, ext = os.path.splitext(os.path.abspath(output_path))
     frame_dir = os.path.dirname(base) or "."
     prefix = os.path.basename(base)
@@ -105,10 +112,12 @@ def _frame_files(output_path: str, expected_ext: Optional[str] = None) -> set:
         ext = expected_ext if expected_ext.startswith(".") else f".{expected_ext}"
     if not os.path.isdir(frame_dir):
         return set()
-    return {
-        f for f in os.listdir(frame_dir)
-        if f.startswith(prefix) and (not ext or f.endswith(ext))
-    }
+
+    pattern = re.compile(
+        rf"^{re.escape(prefix)}\d+{re.escape(ext)}$" if ext
+        else rf"^{re.escape(prefix)}\d+$"
+    )
+    return {f for f in os.listdir(frame_dir) if pattern.match(f)}
 
 
 def render_script_file(
@@ -117,6 +126,7 @@ def render_script_file(
     timeout: int = 300,
     animation: bool = False,
     expected_ext: Optional[str] = None,
+    movie: bool = False,
 ) -> dict:
     """Render an on-disk bpy script with Blender headless and verify the output.
 
@@ -132,7 +142,10 @@ def render_script_file(
     # Frames already on disk from an earlier render with the same prefix are
     # not ours; without this snapshot a 10-frame render into a directory
     # holding 250 old frames would report 250.
-    pre_existing = _frame_files(output_path, expected_ext) if animation else set()
+    # A video format emits one movie file, not a numbered sequence, so it
+    # follows the single-artifact path even when rendering a frame range.
+    sequence = animation and not movie
+    pre_existing = _frame_files(output_path, expected_ext) if sequence else set()
 
     # Mark the start on the same filesystem as the frames rather than trusting
     # wall-clock time: the two can disagree, and mtime granularity varies.
@@ -154,7 +167,7 @@ def render_script_file(
             f"  stderr: {result['stderr'][-500:]}"
         )
 
-    if animation:
+    if sequence:
         base, ext = os.path.splitext(os.path.abspath(output_path))
         frame_dir = os.path.dirname(base) or "."
         after = _frame_files(output_path, expected_ext)
