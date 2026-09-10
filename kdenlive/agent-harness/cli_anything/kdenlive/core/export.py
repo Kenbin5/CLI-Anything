@@ -137,11 +137,32 @@ def render_project(
             f.write(xml)
         cleanup = True
 
+    # A preset codec of "none" means "this stream is disabled", not a codec
+    # name, so it must never reach the backend's codec allowlist — melt takes
+    # vn=1 / an=1 for that. Bitrates are what separate the quality presets,
+    # so they have to be forwarded too or h264_hq and h264_fast encode alike.
+    vcodec = p["vcodec"]
+    acodec = p["acodec"]
+    extra_args = []
+
+    if vcodec == "none":
+        vcodec = ""
+        extra_args.append("vn=1")
+    elif p.get("vbitrate") not in ("0", "", None):
+        extra_args.append(f"vb={p['vbitrate']}")
+
+    if acodec == "none":
+        acodec = ""
+        extra_args.append("an=1")
+    elif p.get("abitrate") not in ("0", "", None):
+        extra_args.append(f"ab={p['abitrate']}")
+
     try:
         result = melt_backend.render_mlt(
             mlt_path, output_path,
-            vcodec=p["vcodec"], acodec=p["acodec"],
+            vcodec=vcodec, acodec=acodec,
             overwrite=overwrite, timeout=timeout,
+            extra_args=extra_args or None,
         )
     finally:
         if cleanup and os.path.exists(mlt_path):
@@ -151,6 +172,7 @@ def render_project(
         "preset": preset,
         "vcodec": p["vcodec"],
         "acodec": p["acodec"],
+        "extra_args": extra_args,
     })
     if keep_mlt:
         result["mlt_path"] = mlt_path
