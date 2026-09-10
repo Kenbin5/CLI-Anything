@@ -13,8 +13,14 @@ from typing import Dict, Any, Optional, Tuple
 
 # Remembers a GIMP batch failure for the life of the process. A hanging batch
 # run costs the full subprocess timeout, so retrying it on every render would
-# make each export pay that cost again.
+# make each export pay that cost again. Only failures of the backend itself
+# belong here — see _REQUEST_SCOPED_ERRORS.
 _GIMP_BACKEND_ERROR: Optional[str] = None
+
+# Errors that describe this particular request rather than the state of the
+# GIMP installation. They must not be cached, and must not be reported as a
+# reason to fall back to Pillow.
+_REQUEST_SCOPED_ERRORS = (FileExistsError, FileNotFoundError, ValueError, KeyError)
 
 
 # Export presets
@@ -96,6 +102,12 @@ def render(
                     preset=preset, overwrite=overwrite,
                     quality=quality, format_override=format_override,
                 )
+        except _REQUEST_SCOPED_ERRORS:
+            # Bad arguments for this one call — an existing output file without
+            # --overwrite, an unreadable source. GIMP is fine; the request is
+            # not. Surface it instead of disguising it as a renderer fallback,
+            # and never let it disable GIMP for subsequent renders.
+            raise
         except Exception as exc:
             skip_reason = f"{type(exc).__name__}: {exc}"
             _GIMP_BACKEND_ERROR = skip_reason
