@@ -20,7 +20,13 @@ _GIMP_BACKEND_ERROR: Optional[str] = None
 # Errors that describe this particular request rather than the state of the
 # GIMP installation. They must not be cached, and must not be reported as a
 # reason to fall back to Pillow.
-_REQUEST_SCOPED_ERRORS = (FileExistsError, FileNotFoundError, ValueError, KeyError)
+#
+# OSError subsumes FileExistsError and FileNotFoundError and adds the other
+# pre-batch output-path failures — PermissionError on an unwritable parent,
+# ENAMETOOLONG, ENOSPC — none of which say anything about whether GIMP works.
+# subprocess.TimeoutExpired and CalledProcessError are not OSErrors, so real
+# backend failures still reach the cache.
+_REQUEST_SCOPED_ERRORS = (ValueError, KeyError, OSError)
 
 
 def _summarise_backend_error(exc: BaseException) -> str:
