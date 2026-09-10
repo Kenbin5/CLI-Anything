@@ -20,6 +20,7 @@ import sys
 import os
 import json
 import shlex
+import subprocess
 import click
 from typing import Optional
 
@@ -105,6 +106,18 @@ def handle_error(func):
                 click.echo(json.dumps({"error": str(e), "type": "file_not_found"}))
             else:
                 click.echo(f"Error: {e}", err=True)
+            if not _repl_mode:
+                sys.exit(1)
+        except subprocess.TimeoutExpired as e:
+            # SoX exceeding the conversion deadline must follow the CLI's
+            # error contract rather than escaping as a traceback with no
+            # --json payload.
+            msg = (f"Export timed out after {e.timeout}s. "
+                   f"Raise --timeout to allow longer conversions.")
+            if _json_output:
+                click.echo(json.dumps({"error": msg, "type": "TimeoutExpired"}))
+            else:
+                click.echo(f"Error: {msg}", err=True)
             if not _repl_mode:
                 sys.exit(1)
         except (ValueError, IndexError, RuntimeError) as e:
