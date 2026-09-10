@@ -665,14 +665,16 @@ def export_preset_info(name):
 @click.option("--preset", "-p", default="wav", help="Export preset")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing file")
 @click.option("--channels", "-ch", type=int, default=None, help="Channel override (1 or 2)")
+@click.option("--timeout", type=int, default=None,
+              help="Max seconds for SoX conversion (default: scales with duration)")
 @handle_error
-def export_render(output_path, preset, overwrite, channels):
+def export_render(output_path, preset, overwrite, channels, timeout):
     """Render the project to an audio file."""
     sess = get_session()
     result = export_mod.render_mix(
         sess.get_project(), output_path,
         preset=preset, overwrite=overwrite,
-        channels_override=channels,
+        channels_override=channels, timeout=timeout,
     )
     output(result, f"Rendered to: {output_path}")
 

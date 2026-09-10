@@ -126,6 +126,7 @@ def render_mix(
     preset: str = "wav",
     overwrite: bool = False,
     channels_override: Optional[int] = None,
+    timeout: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Render the project: mix all tracks, apply effects, export.
 
@@ -215,9 +216,16 @@ def render_mix(
         os.close(tmp_fd)
         try:
             write_wav(tmp_wav, mixed, sample_rate, out_channels, bit_depth)
+            # SoX's own default is a flat 30s, which a long or expensive
+            # encode can exceed even though render_mix accepts projects of
+            # any length. Scale with duration unless the caller says otherwise.
+            conv_timeout = timeout if timeout is not None else max(
+                60, int((len(mixed) / out_channels) / sample_rate) * 4
+            )
             conv = sox_backend.convert_format(
                 tmp_wav, output_path,
                 sample_rate=sample_rate, channels=out_channels,
+                timeout=conv_timeout,
             )
             export_method = conv["method"]
         finally:
