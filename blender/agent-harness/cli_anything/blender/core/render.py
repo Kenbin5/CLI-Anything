@@ -60,6 +60,18 @@ RENDER_PRESETS = {
 VALID_ENGINES = ["CYCLES", "EEVEE", "WORKBENCH"]
 VALID_OUTPUT_FORMATS = ["PNG", "JPEG", "BMP", "TIFF", "OPEN_EXR", "HDR", "FFMPEG"]
 
+# Extension Blender appends when the output path has none and
+# use_file_extension is on (the default).
+FORMAT_EXTENSIONS = {
+    "PNG": ".png",
+    "JPEG": ".jpg",
+    "BMP": ".bmp",
+    "TIFF": ".tif",
+    "OPEN_EXR": ".exr",
+    "HDR": ".hdr",
+    "FFMPEG": ".mp4",
+}
+
 
 def set_render_settings(
     project: Dict[str, Any],
@@ -249,6 +261,7 @@ def render_scene(
 
     render_result = blender_backend.render_script_file(
         script_path, abs_output_path, timeout=timeout, animation=animation,
+        expected_ext=FORMAT_EXTENSIONS.get(render_settings.get("output_format", "PNG")),
     )
     result.update(render_result)
     result["executed"] = True

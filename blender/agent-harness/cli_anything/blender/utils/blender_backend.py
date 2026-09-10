@@ -67,20 +67,44 @@ def render_script(
     }
 
 
-def resolve_output(output_path: str) -> Optional[str]:
+def resolve_output(output_path: str, expected_ext: Optional[str] = None) -> Optional[str]:
     """Return the real rendered file, or None if nothing was produced.
 
     Blender appends a frame number to the output path for single frames,
-    e.g. /tmp/render.png becomes /tmp/render0001.png.
+    e.g. /tmp/render.png becomes /tmp/render0001.png. With the default
+    ``use_file_extension`` it also appends the format's extension when the
+    path has none, so ``render execute /tmp/result`` with PNG output writes
+    /tmp/result.png — pass ``expected_ext`` so that spelling is probed too.
     """
-    if os.path.exists(output_path):
-        return output_path
     base, ext = os.path.splitext(output_path)
-    for suffix in ("0001", "0000", "1"):
-        candidate = f"{base}{suffix}{ext}"
-        if os.path.exists(candidate):
-            return candidate
+
+    # Blender only appends an extension when the path lacks one; if the path
+    # already has an extension it is used as written.
+    tails = [ext]
+    if expected_ext and not ext:
+        tails.append(expected_ext if expected_ext.startswith(".") else f".{expected_ext}")
+
+    for tail in tails:
+        for suffix in ("", "0001", "0000", "1"):
+            candidate = f"{base}{suffix}{tail}"
+            if os.path.exists(candidate):
+                return candidate
     return None
+
+
+def _frame_files(output_path: str, expected_ext: Optional[str] = None) -> set:
+    """Names in the output directory that match the frame-sequence prefix."""
+    base, ext = os.path.splitext(os.path.abspath(output_path))
+    frame_dir = os.path.dirname(base) or "."
+    prefix = os.path.basename(base)
+    if not ext and expected_ext:
+        ext = expected_ext if expected_ext.startswith(".") else f".{expected_ext}"
+    if not os.path.isdir(frame_dir):
+        return set()
+    return {
+        f for f in os.listdir(frame_dir)
+        if f.startswith(prefix) and (not ext or f.endswith(ext))
+    }
 
 
 def render_script_file(
@@ -88,6 +112,7 @@ def render_script_file(
     output_path: str,
     timeout: int = 300,
     animation: bool = False,
+    expected_ext: Optional[str] = None,
 ) -> dict:
     """Render an on-disk bpy script with Blender headless and verify the output.
 
@@ -100,7 +125,27 @@ def render_script_file(
     Returns:
         Dict with output path, file size, method, blender version, command
     """
-    result = render_script(script_path, timeout=timeout)
+    # Frames already on disk from an earlier render with the same prefix are
+    # not ours; without this snapshot a 10-frame render into a directory
+    # holding 250 old frames would report 250.
+    pre_existing = _frame_files(output_path, expected_ext) if animation else set()
+
+    # Mark the start on the same filesystem as the frames rather than trusting
+    # wall-clock time: the two can disagree, and mtime granularity varies.
+    started_marker = None
+    render_started = 0.0
+    if animation:
+        marker_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+        os.makedirs(marker_dir, exist_ok=True)
+        fd, started_marker = tempfile.mkstemp(prefix=".render_started_", dir=marker_dir)
+        os.close(fd)
+        render_started = os.path.getmtime(started_marker)
+
+    try:
+        result = render_script(script_path, timeout=timeout)
+    finally:
+        if started_marker and os.path.exists(started_marker):
+            os.unlink(started_marker)
 
     if result["returncode"] != 0:
         raise RuntimeError(
@@ -111,10 +156,13 @@ def render_script_file(
     if animation:
         base, ext = os.path.splitext(os.path.abspath(output_path))
         frame_dir = os.path.dirname(base) or "."
-        prefix = os.path.basename(base)
+        after = _frame_files(output_path, expected_ext)
+        # Re-rendered frames keep their names, so compare mtimes rather than
+        # names alone: a frame is ours if it is new or was just rewritten.
         frames = sorted(
-            f for f in os.listdir(frame_dir)
-            if f.startswith(prefix) and f.endswith(ext)
+            f for f in after
+            if f not in pre_existing
+            or os.path.getmtime(os.path.join(frame_dir, f)) >= render_started
         )
         if not frames:
             raise RuntimeError(
@@ -132,7 +180,7 @@ def render_script_file(
             "command": result["command"],
         }
 
-    actual_output = resolve_output(output_path)
+    actual_output = resolve_output(output_path, expected_ext)
     if actual_output is None:
         raise RuntimeError(
             f"Blender render produced no output file.\n"
