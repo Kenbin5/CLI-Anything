@@ -67,25 +67,25 @@ EXPORT_PRESETS = {
         "format": "MP3",
         "ext": ".mp3",
         "params": {"bitrate": 192},
-        "description": "MP3 (requires pydub/ffmpeg)",
+        "description": "MP3 192 kbps (requires SoX)",
     },
     "flac": {
         "format": "FLAC",
         "ext": ".flac",
         "params": {},
-        "description": "FLAC lossless (requires pydub/ffmpeg)",
+        "description": "FLAC lossless (requires SoX)",
     },
     "ogg": {
         "format": "OGG",
         "ext": ".ogg",
         "params": {"quality": 5},
-        "description": "OGG Vorbis (requires pydub/ffmpeg)",
+        "description": "OGG Vorbis quality 5 (requires SoX)",
     },
     "aiff": {
         "format": "AIFF",
         "ext": ".aiff",
         "params": {},
-        "description": "AIFF (requires pydub/ffmpeg)",
+        "description": "AIFF (requires SoX)",
     },
 }
 
