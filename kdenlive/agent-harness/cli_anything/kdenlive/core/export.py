@@ -86,6 +86,24 @@ def generate_kdenlive_xml(project: Dict[str, Any]) -> str:
     return build_mlt_xml(project)
 
 
+def _timeline_duration(project: Dict[str, Any]) -> int:
+    """Longest track duration in frames, using the XML builder's own maths.
+
+    Zero means nothing on the timeline has a positive duration, which is the
+    case build_mlt_xml papers over with a 300-second fallback.
+    """
+    from cli_anything.kdenlive.utils.mlt_xml import _compute_track_duration
+
+    profile = project.get("profile", {})
+    fps_num = profile.get("fps_num", 30)
+    fps_den = profile.get("fps_den", 1)
+    return max(
+        (_compute_track_duration(t, fps_num, fps_den)
+         for t in project.get("tracks", [])),
+        default=0,
+    )
+
+
 def render_project(
     project: Dict[str, Any],
     output_path: str,
@@ -120,6 +138,15 @@ def render_project(
 
     if os.path.exists(output_path) and not overwrite:
         raise FileExistsError(f"Output file exists: {output_path}. Use --overwrite.")
+
+    # An empty timeline has no duration of its own, and build_mlt_xml falls
+    # back to 300s — so rendering a fresh project would silently encode five
+    # minutes of black video, often running to the timeout.
+    if not _timeline_duration(project):
+        raise ValueError(
+            "Timeline is empty — nothing to render. "
+            "Add at least one clip with a positive duration first."
+        )
 
     from cli_anything.kdenlive.utils import melt_backend
 
@@ -157,6 +184,11 @@ def render_project(
     elif p.get("abitrate") not in ("0", "", None):
         extra_args.append(f"ab={p['abitrate']}")
 
+    # melt can leave a partial file behind if it is killed or errors after
+    # opening the consumer. Removing an output we created keeps a retry with
+    # a higher --timeout from being refused by the existence check.
+    output_pre_existed = os.path.exists(output_path)
+
     try:
         result = melt_backend.render_mlt(
             mlt_path, output_path,
@@ -164,6 +196,10 @@ def render_project(
             overwrite=overwrite, timeout=timeout,
             extra_args=extra_args or None,
         )
+    except BaseException:
+        if not output_pre_existed and os.path.exists(output_path):
+            os.unlink(output_path)
+        raise
     finally:
         if cleanup and os.path.exists(mlt_path):
             os.unlink(mlt_path)
