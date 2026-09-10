@@ -214,6 +214,16 @@ def render_mix(
 
         tmp_fd, tmp_wav = tempfile.mkstemp(suffix=".wav", prefix="audacity_export_")
         os.close(tmp_fd)
+        # Encode into a sibling temp file and move it into place only on
+        # success: a timeout or SoX error would otherwise leave a truncated
+        # file at output_path, which a retry without --overwrite then refuses.
+        out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+        os.makedirs(out_dir, exist_ok=True)
+        tmp_out_fd, tmp_out = tempfile.mkstemp(
+            suffix=p["ext"], prefix=".audacity_export_", dir=out_dir,
+        )
+        os.close(tmp_out_fd)
+        os.unlink(tmp_out)  # SoX chooses the encoder from the extension
         try:
             write_wav(tmp_wav, mixed, sample_rate, out_channels, bit_depth)
             # SoX's own default is a flat 30s, which a long or expensive
@@ -222,15 +232,21 @@ def render_mix(
             conv_timeout = timeout if timeout is not None else max(
                 60, int((len(mixed) / out_channels) / sample_rate) * 4
             )
+            # Honour the preset's advertised encoding settings; without -C
+            # SoX ignores them and applies its own defaults.
+            params = p.get("params", {})
+            compression = params.get("bitrate", params.get("quality"))
             conv = sox_backend.convert_format(
-                tmp_wav, output_path,
+                tmp_wav, tmp_out,
                 sample_rate=sample_rate, channels=out_channels,
-                timeout=conv_timeout,
+                timeout=conv_timeout, compression=compression,
             )
+            os.replace(conv["output"], output_path)
             export_method = conv["method"]
         finally:
-            if os.path.exists(tmp_wav):
-                os.unlink(tmp_wav)
+            for leftover in (tmp_wav, tmp_out):
+                if os.path.exists(leftover):
+                    os.unlink(leftover)
 
     # Verify output
     file_size = os.path.getsize(output_path)

@@ -120,8 +120,15 @@ def convert_format(
     sample_rate: Optional[int] = None,
     channels: Optional[int] = None,
     timeout: int = 30,
+    compression: Optional[float] = None,
 ) -> dict:
-    """Convert audio format using SoX."""
+    """Convert audio format using SoX.
+
+    Args:
+        compression: SoX -C value, format-specific: kbps for MP3, quality
+            level for Ogg Vorbis. Without it SoX applies its own default and
+            any bitrate or quality the caller advertised is silently ignored.
+    """
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
@@ -133,6 +140,9 @@ def convert_format(
         cmd.extend(["-r", str(sample_rate)])
     if channels:
         cmd.extend(["-c", str(channels)])
+    if compression is not None:
+        # -C applies to the output file, so it must precede output_path.
+        cmd.extend(["-C", str(compression)])
     cmd.append(output_path)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
