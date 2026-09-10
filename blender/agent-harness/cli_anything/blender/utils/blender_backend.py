@@ -84,15 +84,22 @@ def resolve_output(output_path: str, expected_ext: Optional[str] = None) -> Opti
     base, ext = os.path.splitext(output_path)
 
     # Blender only appends an extension when the path lacks one; if the path
-    # already has an extension it is used as written.
-    tails = [ext]
+    # already has an extension it is used as written. When it does append,
+    # that spelling is what this render just wrote — probe it first, or an
+    # older bare file of the same name wins and the freshness check then
+    # rejects a render that actually succeeded.
+    tails = []
     if expected_ext and not ext:
         tails.append(expected_ext if expected_ext.startswith(".") else f".{expected_ext}")
+    tails.append(ext)
 
     for tail in tails:
         for suffix in ("", "0001", "0000", "1"):
             candidate = f"{base}{suffix}{tail}"
-            if os.path.exists(candidate):
+            # isfile, not exists: an output_path naming an existing directory
+            # would otherwise be returned as the rendered artifact, with the
+            # directory entry's size reported as the image size.
+            if os.path.isfile(candidate):
                 return candidate
     return None
 
