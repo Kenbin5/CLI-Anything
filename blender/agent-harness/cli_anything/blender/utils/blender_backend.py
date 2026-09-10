@@ -170,11 +170,18 @@ def render_script_file(
                 f"  Expected: {output_path}\n"
                 f"  stdout: {result['stdout'][-500:]}"
             )
+        # An animation prefix is usually extensionless ("frame_"), so take the
+        # format from expected_ext or an emitted frame rather than returning ""
+        # and clobbering the caller's already-correct format.
+        fmt = ext.lstrip(".")
+        if not fmt:
+            fmt = (expected_ext or os.path.splitext(frames[0])[1]).lstrip(".")
+
         return {
             "output": frame_dir,
             "frames": len(frames),
             "first_frame": os.path.join(frame_dir, frames[0]),
-            "format": ext.lstrip("."),
+            "format": fmt,
             "method": "blender-headless",
             "blender_version": get_version(),
             "command": result["command"],

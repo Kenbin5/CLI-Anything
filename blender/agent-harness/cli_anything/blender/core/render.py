@@ -6,6 +6,7 @@ for actual Blender rendering.
 
 import os
 import json
+import tempfile
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -218,17 +219,39 @@ def render_scene(
     Returns:
         Dict with render info, script path, and (when executed) the real output
     """
-    if os.path.exists(output_path) and not overwrite and not animation:
-        raise FileExistsError(f"Output file exists: {output_path}. Use --overwrite.")
-
     render_settings = project.get("render", {})
     scene_settings = project.get("scene", {})
+    expected_ext = FORMAT_EXTENSIONS.get(render_settings.get("output_format", "PNG"))
+
+    # Guard the files Blender will actually write, not the path as typed.
+    # `render execute result` with PNG output writes result.png, and an
+    # animation writes a whole frame sequence; checking only `output_path`
+    # let both clobber existing files without --overwrite.
+    if not overwrite:
+        from cli_anything.blender.utils import blender_backend as _bb
+
+        if animation:
+            existing = sorted(_bb._frame_files(output_path, expected_ext))
+            if existing:
+                raise FileExistsError(
+                    f"{len(existing)} frame(s) already match this prefix "
+                    f"(e.g. {existing[0]}). Use --overwrite."
+                )
+        else:
+            clash = _bb.resolve_output(output_path, expected_ext)
+            if clash:
+                raise FileExistsError(f"Output file exists: {clash}. Use --overwrite.")
 
     # Determine output directory for the script
     script_dir = os.path.dirname(os.path.abspath(output_path))
     os.makedirs(script_dir, exist_ok=True)
 
-    script_path = os.path.join(script_dir, "_render_script.py")
+    # Unique per invocation: two concurrent renders into the same directory
+    # would otherwise overwrite each other's script before Blender read it.
+    script_fd, script_path = tempfile.mkstemp(
+        prefix="_render_script_", suffix=".py", dir=script_dir,
+    )
+    os.close(script_fd)
     # Ensure output_path is absolute before passing it to the script generator
     # as Blender's background process may have a different CWD.
     abs_output_path = os.path.abspath(output_path)
@@ -261,7 +284,7 @@ def render_scene(
 
     render_result = blender_backend.render_script_file(
         script_path, abs_output_path, timeout=timeout, animation=animation,
-        expected_ext=FORMAT_EXTENSIONS.get(render_settings.get("output_format", "PNG")),
+        expected_ext=expected_ext,
     )
     result.update(render_result)
     result["executed"] = True
