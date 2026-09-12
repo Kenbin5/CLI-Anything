@@ -86,22 +86,29 @@ def generate_kdenlive_xml(project: Dict[str, Any]) -> str:
     return build_mlt_xml(project)
 
 
-def _timeline_duration(project: Dict[str, Any]) -> int:
-    """Longest track duration in frames, using the XML builder's own maths.
+def _renderable_duration(project: Dict[str, Any]) -> float:
+    """Longest timeline end time in seconds, counting only renderable clips.
 
-    Zero means nothing on the timeline has a positive duration, which is the
-    case build_mlt_xml papers over with a 300-second fallback.
+    Two things this must not do. It must not reuse _compute_track_duration,
+    which returns the inclusive final frame index — that is 0 for a valid
+    one-frame clip, and treating it as "empty" would reject a timeline melt
+    can render. And it must skip entries whose clip id is no longer in the
+    bin: `bin remove` leaves the track entry behind and build_mlt_xml skips
+    it, so counting it here would wave an effectively empty timeline through
+    to melt as black video.
     """
-    from cli_anything.kdenlive.utils.mlt_xml import _compute_track_duration
+    bin_ids = {c.get("id") for c in project.get("bin", [])}
 
-    profile = project.get("profile", {})
-    fps_num = profile.get("fps_num", 30)
-    fps_den = profile.get("fps_den", 1)
-    return max(
-        (_compute_track_duration(t, fps_num, fps_den)
-         for t in project.get("tracks", [])),
-        default=0,
-    )
+    longest = 0.0
+    for track in project.get("tracks", []):
+        for entry in track.get("clips", []):
+            if entry.get("clip_id") not in bin_ids:
+                continue
+            span = entry.get("out", 0) - entry.get("in", 0)
+            if span <= 0:
+                continue
+            longest = max(longest, entry.get("position", 0.0) + span)
+    return longest
 
 
 def render_project(
@@ -142,10 +149,11 @@ def render_project(
     # An empty timeline has no duration of its own, and build_mlt_xml falls
     # back to 300s — so rendering a fresh project would silently encode five
     # minutes of black video, often running to the timeout.
-    if not _timeline_duration(project):
+    if not _renderable_duration(project):
         raise ValueError(
-            "Timeline is empty — nothing to render. "
-            "Add at least one clip with a positive duration first."
+            "Timeline has nothing renderable — no clip with a positive "
+            "duration resolves to a bin entry. Add a clip, or re-import one "
+            "that was removed from the bin."
         )
 
     from cli_anything.kdenlive.utils import melt_backend
