@@ -212,19 +212,24 @@ def render_mix(
         # silently corrupt file, so the conversion is mandatory, not optional.
         from cli_anything.audacity.utils import sox_backend
 
-        tmp_fd, tmp_wav = tempfile.mkstemp(suffix=".wav", prefix="audacity_export_")
-        os.close(tmp_fd)
-        # Encode into a sibling temp file and move it into place only on
-        # success: a timeout or SoX error would otherwise leave a truncated
-        # file at output_path, which a retry without --overwrite then refuses.
-        out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
-        os.makedirs(out_dir, exist_ok=True)
-        tmp_out_fd, tmp_out = tempfile.mkstemp(
-            suffix=p["ext"], prefix=".audacity_export_", dir=out_dir,
-        )
-        os.close(tmp_out_fd)
-        os.unlink(tmp_out)  # SoX chooses the encoder from the extension
+        # Both temp files are created inside the try: if creating the second
+        # one fails — an unwritable parent, a regular file where a directory
+        # is expected — the first must still be cleaned up rather than left
+        # behind in the system temp directory on every failed export.
+        tmp_wav = tmp_out = None
         try:
+            tmp_fd, tmp_wav = tempfile.mkstemp(suffix=".wav", prefix="audacity_export_")
+            os.close(tmp_fd)
+            # Encode into a sibling temp file and move it into place only on
+            # success: a timeout or SoX error would otherwise leave a truncated
+            # file at output_path, which a retry without --overwrite refuses.
+            out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+            os.makedirs(out_dir, exist_ok=True)
+            tmp_out_fd, tmp_out = tempfile.mkstemp(
+                suffix=p["ext"], prefix=".audacity_export_", dir=out_dir,
+            )
+            os.close(tmp_out_fd)
+            os.unlink(tmp_out)  # SoX chooses the encoder from the extension
             write_wav(tmp_wav, mixed, sample_rate, out_channels, bit_depth)
             # SoX's own default is a flat 30s, which a long or expensive
             # encode can exceed even though render_mix accepts projects of
@@ -245,7 +250,7 @@ def render_mix(
             export_method = conv["method"]
         finally:
             for leftover in (tmp_wav, tmp_out):
-                if os.path.exists(leftover):
+                if leftover and os.path.exists(leftover):
                     os.unlink(leftover)
 
     # Verify output
