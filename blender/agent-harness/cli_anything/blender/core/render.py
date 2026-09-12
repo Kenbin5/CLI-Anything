@@ -238,11 +238,20 @@ def render_scene(
         from cli_anything.blender.utils import blender_backend as _bb
 
         if animation:
-            existing = sorted(_bb._frame_files(output_path, expected_ext))
+            # Only frames this render will actually write count as a
+            # collision: reusing a prefix for a different range should not be
+            # refused because frame_0250.png from an earlier one is present.
+            this_range = (
+                scene_settings.get("frame_start", 1),
+                scene_settings.get("frame_end", 250),
+            )
+            existing = sorted(
+                _bb._frame_files(output_path, expected_ext, frame_range=this_range)
+            )
             if existing:
                 raise FileExistsError(
-                    f"{len(existing)} frame(s) already match this prefix "
-                    f"(e.g. {existing[0]}). Use --overwrite."
+                    f"{len(existing)} frame(s) in range {this_range[0]}-{this_range[1]} "
+                    f"already exist (e.g. {existing[0]}). Use --overwrite."
                 )
         else:
             clash = _bb.resolve_output(output_path, expected_ext)

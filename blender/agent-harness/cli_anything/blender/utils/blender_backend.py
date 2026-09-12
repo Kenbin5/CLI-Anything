@@ -104,13 +104,18 @@ def resolve_output(output_path: str, expected_ext: Optional[str] = None) -> Opti
     return None
 
 
-def _frame_files(output_path: str, expected_ext: Optional[str] = None) -> set:
+def _frame_files(output_path: str, expected_ext: Optional[str] = None,
+                 frame_range: Optional[tuple] = None) -> set:
     """Names in the output directory that are frames of this sequence.
 
     Blender numbers frames as <prefix><digits><ext>. Matching on prefix and
     extension alone would also pick up unrelated neighbours such as
     frame_preview.png, which would then block a render without --overwrite
     and be miscounted as an emitted frame with it.
+
+    ``frame_range`` narrows the match to (start, end) inclusive. The collision
+    preflight passes it so that rendering frames 1-10 is not refused because
+    frame_0250.png from an unrelated earlier range happens to be present.
     """
     base, ext = os.path.splitext(os.path.abspath(output_path))
     frame_dir = os.path.dirname(base) or "."
@@ -121,10 +126,20 @@ def _frame_files(output_path: str, expected_ext: Optional[str] = None) -> set:
         return set()
 
     pattern = re.compile(
-        rf"^{re.escape(prefix)}\d+{re.escape(ext)}$" if ext
-        else rf"^{re.escape(prefix)}\d+$"
+        rf"^{re.escape(prefix)}(\d+){re.escape(ext)}$" if ext
+        else rf"^{re.escape(prefix)}(\d+)$"
     )
-    return {f for f in os.listdir(frame_dir) if pattern.match(f)}
+    matches = set()
+    for f in os.listdir(frame_dir):
+        m = pattern.match(f)
+        if not m:
+            continue
+        if frame_range is not None:
+            n = int(m.group(1))
+            if not (frame_range[0] <= n <= frame_range[1]):
+                continue
+        matches.add(f)
+    return matches
 
 
 def render_script_file(
