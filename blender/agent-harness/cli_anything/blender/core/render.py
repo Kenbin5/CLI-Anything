@@ -231,7 +231,10 @@ def render_scene(
     # `render execute result` with PNG output writes result.png, and an
     # animation writes a whole frame sequence; checking only `output_path`
     # let both clobber existing files without --overwrite.
-    if not overwrite:
+    # Only when the render will actually run: --no-execute writes a uniquely
+    # named script and touches no artifact, so refusing it over unrelated
+    # existing output would block harmless script inspection.
+    if execute and not overwrite:
         from cli_anything.blender.utils import blender_backend as _bb
 
         if animation:

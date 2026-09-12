@@ -180,11 +180,20 @@ def render_script_file(
         after = _frame_files(output_path, expected_ext)
         # Re-rendered frames keep their names, so compare mtimes rather than
         # names alone: a frame is ours if it is new or was just rewritten.
-        frames = sorted(
+        mine = [
             f for f in after
             if f not in pre_existing
             or os.path.getmtime(os.path.join(frame_dir, f)) >= render_started
-        )
+        ]
+
+        # Sort by frame number, not lexicographically: across a digit-width
+        # boundary a plain sort puts frame10000.png before frame9999.png, and
+        # first_frame would then name the wrong frame.
+        def _frame_number(name: str) -> int:
+            m = re.search(r"(\d+)(?:\.[^.]*)?$", name)
+            return int(m.group(1)) if m else 0
+
+        frames = sorted(mine, key=_frame_number)
         if not frames:
             raise RuntimeError(
                 f"Blender render produced no frames.\n"
