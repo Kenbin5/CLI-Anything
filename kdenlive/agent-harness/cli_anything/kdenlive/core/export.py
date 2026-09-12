@@ -149,6 +149,17 @@ def render_project(
     # An empty timeline has no duration of its own, and build_mlt_xml falls
     # back to 300s — so rendering a fresh project would silently encode five
     # minutes of black video, often running to the timeout.
+    # Writing the intermediate XML over the render target would leave MLT XML
+    # at the media path, and with --overwrite would ask melt to read its input
+    # while replacing that same file.
+    if keep_mlt and os.path.realpath(os.path.abspath(keep_mlt)) == os.path.realpath(
+        os.path.abspath(output_path)
+    ):
+        raise ValueError(
+            "--keep-mlt and the output path are the same file. "
+            "Give the MLT XML a different path."
+        )
+
     if not _renderable_duration(project):
         raise ValueError(
             "Timeline has nothing renderable — no clip with a positive "
