@@ -204,6 +204,8 @@ def render_mix(
 
     # Export
     export_method = "python-wave"
+    rate_clamped = False
+    output_sample_rate = sample_rate
     if fmt == "WAV":
         write_wav(output_path, mixed, sample_rate, out_channels, bit_depth)
     else:
@@ -248,6 +250,12 @@ def render_mix(
             )
             os.replace(conv["output"], output_path)
             export_method = conv["method"]
+            # Report the rate the encoder actually used. MP3 caps at 48 kHz,
+            # so a 96 kHz project must not be reported back as 96 kHz while
+            # the file on disk is 48 kHz.
+            if conv.get("sample_rate"):
+                output_sample_rate = conv["sample_rate"]
+            rate_clamped = bool(conv.get("sample_rate_clamped"))
         finally:
             for leftover in (tmp_wav, tmp_out):
                 if leftover and os.path.exists(leftover):
@@ -260,7 +268,8 @@ def render_mix(
     result = {
         "output": os.path.abspath(output_path),
         "format": fmt,
-        "sample_rate": sample_rate,
+        "sample_rate": output_sample_rate,
+        "project_sample_rate": sample_rate,
         "channels": out_channels,
         "bit_depth": bit_depth,
         "duration": round(duration, 3),
@@ -269,6 +278,7 @@ def render_mix(
         "file_size_human": _human_size(file_size),
         "preset": preset,
         "method": export_method,
+        "sample_rate_clamped": rate_clamped,
         "tracks_rendered": len(rendered_tracks),
         "peak_level": round(get_peak(mixed), 4),
         "rms_level": round(get_rms(mixed), 4),

@@ -13,6 +13,12 @@ import subprocess
 from typing import Optional, List
 
 
+# Highest sample rate each container can actually encode. SoX warns and
+# downsamples rather than failing, which would otherwise leave the reported
+# rate disagreeing with the file.
+_MAX_SAMPLE_RATE = {"mp3": 48000}
+
+
 def find_sox() -> str:
     """Find the SoX executable."""
     path = shutil.which("sox")
@@ -135,9 +141,18 @@ def convert_format(
     sox = find_sox()
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
+    # MP3 cannot encode above 48 kHz. SoX silently downsamples and warns, so a
+    # 96 kHz project would otherwise be reported back at 96 kHz while the file
+    # on disk is 48 kHz. Clamp deliberately and report what was actually used.
+    effective_rate = sample_rate
+    ext = os.path.splitext(output_path)[1].lower().lstrip(".")
+    max_rate = _MAX_SAMPLE_RATE.get(ext)
+    if sample_rate and max_rate and sample_rate > max_rate:
+        effective_rate = max_rate
+
     cmd = [sox, input_path]
-    if sample_rate:
-        cmd.extend(["-r", str(sample_rate)])
+    if effective_rate:
+        cmd.extend(["-r", str(effective_rate)])
     if channels:
         cmd.extend(["-c", str(channels)])
     if compression is not None:
@@ -158,4 +173,6 @@ def convert_format(
         "format": os.path.splitext(output_path)[1].lstrip("."),
         "method": "sox",
         "file_size": os.path.getsize(output_path),
+        "sample_rate": effective_rate,
+        "sample_rate_clamped": effective_rate != sample_rate,
     }
